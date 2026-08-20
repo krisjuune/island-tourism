@@ -12,6 +12,14 @@ globals [
   river-level
   water-supply-level
   current-season
+  council-money
+  probability-meeting-demand
+  river-level-floor
+  piping-draw-rate
+  water-supply-gain-rate
+  tourist-growth-rate
+  pipe-cost
+  pipe-water-gain
 ]
 
 patches-own [ 
@@ -32,6 +40,7 @@ residents-own [
   local
   job
   happiness
+  consecutive-unhappy-months
 ]
 
 tourists-own [
@@ -45,7 +54,18 @@ tourists-own [
 to setup
   clear-all
   
+  ;; set globals
   set beach-deterioration 0
+  set river-level 100
+  set water-supply-level 50
+  set current-season 0
+  set probability-meeting-demand 0.5
+  set river-level-floor 10
+  set piping-draw-rate 0.02
+  set water-supply-gain-rate 0.5
+  set tourist-growth-rate 20
+  set pipe-cost 100
+  set pipe-water-gain 10
   
   ;; build island
   ask patches [
@@ -69,6 +89,8 @@ to setup
   ]
   color-land
   
+  ;; build hotels
+  build-hotels
   
   ;; build residents
   let n-local-residents round (n-residents * (1 - proportion-seasonal-worker))
@@ -82,13 +104,64 @@ to setup
     ]
   ]
   
-  ;; build hotels
-  build-hotels
+    ;; assign resident jobs + create seasonal hotel workers
+  let n-seasonal-workers round (n-residents * proportion-seasonal-worker)
+  let n-local-hoteliers n-seasonal-workers  ;; 50/50 split of hotel workforce
+  ask n-of (min list n-local-hoteliers count residents) residents [
+    set job "hotelier"
+  ]
+  ask residents with [ job != "hotelier" ] [
+    set job "farmer"
+  ]
+  ifelse count hotels > 0 [
+    let seasonal-per-hotel round (n-seasonal-workers / count hotels)
+    ask hotels [
+      hatch-residents seasonal-per-hotel [
+        set shape "person"
+        set color gray
+        set size 0.5
+        set local false
+        set job "hotelier"
+        set consecutive-unhappy-months 0
+      ]
+    ]
+    let n-local-hoteliers-actual count residents with [ job = "hotelier" and local ]
+    ask hotels [
+      set n-workers seasonal-per-hotel + (n-local-hoteliers-actual / count hotels)
+    ]
+  ] [
+    user-message "No hotels built — check hotel-capacity and n-tourists"
+  ]
+  
+  ;; build tourists (after build-hotels)
+  create-tourists n-tourists [
+    set shape "person"
+    set size 0.5
+    set color orange
+    set tourist-type ifelse-value (random-float 1 < proportion-boat-tourist) [ "boat" ] [ "hotel" ]
+    ifelse tourist-type = "boat" [
+      move-to one-of patches with [ land-type = "beach" ]
+    ] [
+      move-to one-of patches with [ land-type = "buildland" ]
+    ]
+  ]
+  
+  ;; council
+  create-councils 1 [
+    set shape "flag"
+    set color black
+    move-to one-of patches with [ land-type = "buildland" ]
+  ]
+
   
   ;; compute real happiness
-  ask residents [
+  ask residents with [ local ][
     set happiness compute-happiness
   ]
+  
+  ;; compute starting council-money
+  set council-money (count residents with [ local ]) * locals-tax-rate
+  
   
   reset-ticks
 end
@@ -98,11 +171,18 @@ end
 ;; go
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 to go
+  update-tourism
+  update-happiness
+  births
+  update-council-money
+  if ticks > 0 and ticks mod 6 = 0 [
+    council-decide-pipes
+  ]
   color-land
   tick
 end
-
 
 
 
@@ -145,6 +225,7 @@ end
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; build hotels TODO add death of hotels
 to build-hotels
   let n-hotel-tourists n-tourists * (1 - proportion-boat-tourist)
   let n-hotels ceiling (n-hotel-tourists / hotel-capacity)
@@ -158,16 +239,132 @@ to build-hotels
   ]
 end
 
-to-report compute-happiness
-  let n-farmland count patches in-radius happiness-radius with [ land-type = "farmland" ]
-  let n-hotels count hotels in-radius happiness-radius
-  let n-residents-nearby count other residents in-radius happiness-radius
-  report 100 * (n-farmland + n-residents-nearby + 1) / (n-farmland + n-residents-nearby + n-hotels + 2)
+;; update nr of tourists
+to update-tourism
+  let draw (count tourists) * piping-draw-rate
+  set river-level max list river-level-floor (river-level - draw)
+  set water-supply-level min list 100 (water-supply-level + draw * water-supply-gain-rate)
+  set probability-meeting-demand water-supply-level / 100
+  let tourist-change round ((probability-meeting-demand - 0.5) * tourist-growth-rate)
+  ifelse tourist-change > 0 [
+    create-tourists tourist-change [
+      set shape "person"
+      set color orange
+      set size 0.5
+      move-to one-of patches with [ land-type = "beach" or land-type = "buildland" ]
+      set tourist-type ifelse-value (random-float 1 < proportion-boat-tourist) [ "boat" ] [ "hotel" ]
+    ]
+  ] [
+    if tourist-change < 0 [
+      ask n-of (min list (abs tourist-change) count tourists) tourists [ die ]
+    ]
+  ]
+  set n-tourists count tourists
 end
-]]></code>
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; council procedures
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; update council money
+to update-council-money
+  ;; tourists taxed every month
+  set council-money council-money + (tourist-tax-rate / 100 * n-tourists)
+  ;; residents and hotels taxed every 6 months (season)
+  if ticks > 0 and ticks mod 6 = 0 [
+    set council-money council-money
+      + (business-tax-rate / 100 * count hotels)
+      + (locals-tax-rate / 100 * count residents with [ local ])
+  ]
+end
+
+;; council decides
+to council-decide-pipes
+  if council-money >= pipe-cost and water-supply-level < 80 [
+    make-infrastructure
+    set water-supply-level min list 100 (water-supply-level + pipe-water-gain)
+    set council-money council-money - pipe-cost
+  ]
+  ifelse council-money < low-funds-threshold [
+    set business-tax-rate min list 100 (business-tax-rate + 1)
+  ] [
+    set business-tax-rate max list 0 (business-tax-rate - 0.5)
+  ]
+end
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; resident procedures
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; get residents happiness
+to-report compute-happiness
+  let n-tourists-nearby count tourists in-radius happiness-radius
+  let n-locals-nearby count other residents with [ local ] in-radius happiness-radius
+  report 100 * (n-locals-nearby + 1) / (n-locals-nearby + n-tourists-nearby + 2)
+end
+
+to update-happiness
+  ask residents with [ local ] [
+    set happiness compute-happiness
+    ifelse happiness < happiness-threshold [
+      set consecutive-unhappy-months consecutive-unhappy-months + 1
+    ] [
+      set consecutive-unhappy-months 0
+    ]
+    if consecutive-unhappy-months >= unhappy-months-threshold [
+      consider-leaving-or-switching
+    ]
+  ]
+end
+
+;; decide about leaving
+to consider-leaving-or-switching
+  let severity (consecutive-unhappy-months - unhappy-months-threshold + 1)
+  let p-act min list 1 (0.1 * severity)
+  if random-float 1 < p-act [
+    ifelse job = "farmer" [
+      let switch-attractiveness max list 0 (1 - business-tax-rate)
+      ifelse random-float 1 < switch-attractiveness [
+        set job "hotelier"
+        set consecutive-unhappy-months 0
+      ] [
+        leave-island
+      ]
+    ] [
+      leave-island
+    ]
+  ]
+end
+
+to leave-island
+  set council-money council-money - locals-tax-rate
+  die
+end
+
+to births
+  if random-float 1 < birth-rate [
+    let birth-patches patches with [ land-type = "farmland" or land-type = "buildland" ]
+    if any? birth-patches [
+      ask one-of birth-patches [
+        sprout-residents 1 [
+          set shape "person"
+          set color black
+          set size 0.5
+          set local true
+          set consecutive-unhappy-months 0
+          set job ifelse-value (random-float 1 < 0.5) [ "farmer" ] [ "hotelier" ]
+        ]
+      ]
+    ]
+  ]
+end]]></code>
   <widgets>
     <view x="368" wrappingAllowedX="false" y="10" frameRate="30.0" minPycor="0" height="525" showTickCounter="true" patchSize="13.0" fontSize="10" wrappingAllowedY="false" width="525" tickCounterLabel="ticks" maxPycor="39" updateMode="0" maxPxcor="39" minPxcor="0"></view>
-    <slider x="75" step="10" y="160" max="2000" width="250" display="n-tourists" height="50" min="0" direction="Horizontal" default="440.0" variable="n-tourists" units="x 10 people"></slider>
+    <slider x="75" step="10" y="160" max="2000" width="250" display="n-tourists" height="50" min="0" direction="Horizontal" default="316.0" variable="n-tourists" units="x 10 people"></slider>
     <button x="80" y="90" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="85" display="Forward">go</button>
     <button x="180" y="90" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="65" display="Forward">go</button>
     <slider x="75" step="10" y="230" max="1000" width="250" display="n-residents" height="50" min="0" direction="Horizontal" default="100.0" variable="n-residents" units="x 10 people"></slider>
@@ -179,12 +376,39 @@ end
       <setup>set-current-plot-pen "default"
 set-plot-pen-mode 2</setup>
       <update>clear-plot</update>
-      <pen interval="1.0" mode="2" display="pen-0" color="-11783835" legend="true">
+      <pen interval="1.0" mode="2" display="happiness" color="-11783835" legend="true">
         <setup></setup>
-        <update>ask residents [ plotxy who happiness ]</update>
+        <update>ask residents with [ local ] [ plotxy who happiness ]</update>
       </pen>
     </plot>
     <button x="80" y="30" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="90" display="Create island">setup</button>
+    <slider x="905" step="1" y="15" max="100" width="250" display="locals-tax-rate" height="50" min="0" direction="Horizontal" default="10.0" variable="locals-tax-rate"></slider>
+    <monitor x="75" precision="0" y="760" height="60" fontSize="11" width="100" display="Council money">council-money</monitor>
+    <plot x="360" autoPlotX="true" yMax="10.0" autoPlotY="true" yAxis="Number" y="570" xMin="0.0" height="175" legend="true" xMax="10.0" yMin="0.0" width="540" xAxis="Month" display="Residents vs tourists">
+      <setup>clear-plot</setup>
+      <update></update>
+      <pen interval="1.0" mode="0" display="Locals" color="-13791810" legend="true">
+        <setup></setup>
+        <update>plot count residents with [ local ]</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Hotel tourists" color="-2674135" legend="true">
+        <setup></setup>
+        <update>plot count tourists with [ tourist-type = "hotel" ]</update>
+      </pen>
+      <pen interval="1.0" mode="0" display="Boat tourists" color="-7500403" legend="true">
+        <setup></setup>
+        <update>plot count tourists with [ tourist-type = "boat" ]</update>
+      </pen>
+    </plot>
+    <slider x="905" step="0.1" y="210" max="0.5" width="250" display="birth-rate" height="50" min="0" direction="Horizontal" default="0.1" variable="birth-rate"></slider>
+    <slider x="905" step="10" y="275" max="1000" width="250" display="low-funds-threshold" height="50" min="0" direction="Horizontal" default="200.0" variable="low-funds-threshold"></slider>
+    <slider x="905" step="10" y="340" max="50" width="250" display="happiness-threshold" height="50" min="10" direction="Horizontal" default="30.0" variable="happiness-threshold" units="out of 100"></slider>
+    <slider x="905" step="1" y="80" max="100" width="250" display="business-tax-rate" height="50" min="0" direction="Horizontal" default="0.0" variable="business-tax-rate"></slider>
+    <slider x="905" step="1" y="145" max="100" width="250" display="tourist-tax-rate" height="50" min="0" direction="Horizontal" default="0.0" variable="tourist-tax-rate"></slider>
+    <slider x="905" step="1" y="405" max="12" width="250" display="unhappy-months-threshold" height="50" min="0" direction="Horizontal" default="6.0" variable="unhappy-months-threshold" units="months"></slider>
+    <monitor x="190" precision="0" y="760" height="60" fontSize="11" width="100" display="Local tax">locals-tax-rate</monitor>
+    <monitor x="305" precision="0" y="760" height="60" fontSize="11" width="100" display="Business tax">business-tax-rate</monitor>
+    <monitor x="420" precision="0" y="760" height="60" fontSize="11" width="100" display="Tourist tax">tourist-tax-rate</monitor>
   </widgets>
   <info>## WHAT IS IT?
 
