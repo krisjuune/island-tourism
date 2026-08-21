@@ -17,14 +17,11 @@ globals [
   river-level-floor
   piping-draw-rate
   water-supply-gain-rate
-  tourist-growth-rate
   pipe-cost
   pipe-water-gain
   p-raise-business-tax
   last-summer-tourist-level
   room-rate
-  tourist-attrition-scale
-  sewage-rate
   beach-recovery-rate
   water-demand-per-tourist
   boat-tourist-baseline
@@ -84,14 +81,11 @@ to setup
   set river-level-floor 10
   set piping-draw-rate 0.02
   set water-supply-gain-rate 0.5
-  set tourist-growth-rate 20
   set pipe-cost 100
   set pipe-water-gain 10
   set p-raise-business-tax 0.5
   set current-season 0
   set room-rate 5
-  set tourist-attrition-scale 0.2
-  set sewage-rate 0.002
   set beach-recovery-rate 0.05
   set water-demand-per-tourist 0.5
   set infra-water-yield 2
@@ -225,6 +219,7 @@ to go
   update-hotel-finances
   update-happiness
   births
+  deaths
   update-council-money
   if ticks > 0 and ticks mod 6 = 0 [
     council-decide-pipes
@@ -555,24 +550,42 @@ end
 
 to births
   if random-float 1 < birth-rate [
-    let birth-patches patches with [ land-type = "farmland" or land-type = "buildland" ]
-    if any? birth-patches [
-      ask one-of birth-patches [
-        sprout-residents 1 [
-          set shape "person"
-          set color black
-          set size 0.5
-          set local true
-          set consecutive-unhappy-months 0
-          set job ifelse-value (random-float 1 < 0.5) [ "farmer" ] [ "hotelier" ]
+    let n-locals count residents with [ local ]
+    let max-locals count patches with [
+      (land-type = "farmland" or land-type = "buildland") and not any? hotels-here
+    ]
+    if n-locals < max-locals [
+      let birth-patches patches with [
+        (land-type = "farmland" or land-type = "buildland")
+        and not any? hotels-here
+        and not any? residents-here
+      ]
+      if any? birth-patches [
+        ask one-of birth-patches [
+          sprout-residents 1 [
+            set shape "person"
+            set color black
+            set size 0.5
+            set local true
+            set consecutive-unhappy-months 0
+            set job ifelse-value (random-float 1 < 0.5) [ "farmer" ] [ "hotelier" ]
+          ]
         ]
       ]
+    ]
+  ]
+end
+
+to deaths
+  ask residents with [ local ] [
+    if random-float 1 < death-rate [
+      leave-island
     ]
   ]
 end]]></code>
   <widgets>
     <view x="368" wrappingAllowedX="false" y="10" frameRate="30.0" minPycor="0" height="525" showTickCounter="true" patchSize="13.0" fontSize="10" wrappingAllowedY="false" width="525" tickCounterLabel="ticks" maxPycor="39" updateMode="0" maxPxcor="39" minPxcor="0"></view>
-    <slider x="75" step="100" y="160" max="2000" width="250" display="n-tourists" height="50" min="0" direction="Horizontal" default="0.0" variable="n-tourists" units="x 10 people"></slider>
+    <slider x="75" step="100" y="160" max="2000" width="250" display="n-tourists" height="50" min="0" direction="Horizontal" default="200.0" variable="n-tourists" units="x 10 people"></slider>
     <button x="80" y="90" height="40" disableUntilTicks="false" forever="true" kind="Observer" width="85" display="Forward">go</button>
     <button x="180" y="90" height="40" disableUntilTicks="false" forever="false" kind="Observer" width="65" display="Forward">go</button>
     <slider x="75" step="100" y="230" max="1000" width="250" display="n-residents" height="50" min="0" direction="Horizontal" default="100.0" variable="n-residents" units="x 10 people"></slider>
@@ -609,8 +622,8 @@ end]]></code>
     <slider x="905" step="0.1" y="210" max="0.5" width="250" display="birth-rate" height="50" min="0" direction="Horizontal" default="0.1" variable="birth-rate"></slider>
     <slider x="905" step="100" y="275" max="1000" width="250" display="low-funds-threshold" height="50" min="0" direction="Horizontal" default="400.0" variable="low-funds-threshold"></slider>
     <slider x="905" step="10" y="340" max="50" width="250" display="happiness-threshold" height="50" min="10" direction="Horizontal" default="30.0" variable="happiness-threshold" units="out of 100"></slider>
-    <slider x="905" step="10" y="80" max="100" width="250" display="business-tax-rate" height="50" min="0" direction="Horizontal" default="100.0" variable="business-tax-rate"></slider>
-    <slider x="905" step="10" y="145" max="100" width="250" display="tourist-tax-rate" height="50" min="0" direction="Horizontal" default="100.0" variable="tourist-tax-rate"></slider>
+    <slider x="905" step="10" y="80" max="100" width="250" display="business-tax-rate" height="50" min="0" direction="Horizontal" default="10.0" variable="business-tax-rate"></slider>
+    <slider x="905" step="10" y="145" max="100" width="250" display="tourist-tax-rate" height="50" min="0" direction="Horizontal" default="0.0" variable="tourist-tax-rate"></slider>
     <slider x="905" step="1" y="405" max="12" width="250" display="unhappy-months-threshold" height="50" min="0" direction="Horizontal" default="6.0" variable="unhappy-months-threshold" units="months"></slider>
     <monitor x="190" precision="0" y="760" height="60" fontSize="11" width="100" display="Local tax">locals-tax-rate</monitor>
     <monitor x="305" precision="0" y="760" height="60" fontSize="11" width="100" display="Business tax">business-tax-rate</monitor>
@@ -631,6 +644,10 @@ end]]></code>
     <monitor x="535" precision="0" y="760" height="60" fontSize="11" width="100" display="Infrastructure">count patches with [ land-type = "infrastructure" ]</monitor>
     <monitor x="650" precision="0" y="760" height="60" fontSize="11" width="100" display="Hotels">count hotels</monitor>
     <switch x="185" y="30" height="40" on="true" variable="initialise?" width="105" display="initialise?"></switch>
+    <slider x="1175" step="0.05" y="15" max="1" width="250" display="tourist-attrition-scale" height="50" min="0" direction="Horizontal" default="0.05" variable="tourist-attrition-scale"></slider>
+    <slider x="1175" step="5" y="80" max="100" width="250" display="tourist-growth-rate" height="50" min="0" direction="Horizontal" default="20.0" variable="tourist-growth-rate"></slider>
+    <slider x="1175" step="0.0005" y="145" max="0.01" width="250" display="sewage-rate" height="50" min="0" direction="Horizontal" default="0.002" variable="sewage-rate"></slider>
+    <slider x="1175" step="0.01" y="210" max="1" width="250" display="death-rate" height="50" min="0" direction="Horizontal" default="0.01" variable="death-rate"></slider>
   </widgets>
   <info>## WHAT IS IT?
 
@@ -1502,4 +1519,418 @@ end]]></code>
     </shape>
   </linkShapes>
   <previewCommands>setup repeat 75 [ go ]</previewCommands>
+  <experiments>
+    <experiment name="birth-rate" repetitions="3" sequentialRunOrder="true" runMetricsEveryStep="true" timeLimit="8000">
+      <setup>setup</setup>
+      <go>go</go>
+      <metrics>
+        <metric>count residents with [ local ]</metric>
+        <metric>count tourists with [ tourist-type = "hotel" ]</metric>
+        <metric>count tourists with [ tourist-type = "boat" ]</metric>
+        <metric>count hotels</metric>
+        <metric>mean [happiness] of residents with [ local ]</metric>
+        <metric>standard-deviation [happiness] of residents with [ local ]</metric>
+        <metric>min [happiness] of residents with [ local ]</metric>
+        <metric>max [happiness] of residents with [ local ]</metric>
+        <metric>tourist-tax-rate</metric>
+        <metric>business-tax-rate</metric>
+      </metrics>
+      <constants>
+        <enumeratedValueSet variable="birth-rate">
+          <value value="0.001"></value>
+          <value value="0.01"></value>
+          <value value="0.1"></value>
+          <value value="0.2"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="unhappy-months-threshold">
+          <value value="6"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="initialise?">
+          <value value="true"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-seasonal-worker">
+          <value value="0.3"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="hotel-capacity">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-boat-tourist">
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-residents">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="low-funds-threshold">
+          <value value="400"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-tax-rate">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-tourists">
+          <value value="73"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-threshold">
+          <value value="30"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="locals-tax-rate">
+          <value value="10"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="business-tax-rate">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-radius">
+          <value value="5"></value>
+        </enumeratedValueSet>
+      </constants>
+    </experiment>
+    <experiment name="local-tax-rate" repetitions="3" sequentialRunOrder="true" runMetricsEveryStep="true" timeLimit="8000">
+      <setup>setup</setup>
+      <go>go</go>
+      <metrics>
+        <metric>count residents with [ local ]</metric>
+        <metric>count tourists with [ tourist-type = "hotel" ]</metric>
+        <metric>count tourists with [ tourist-type = "boat" ]</metric>
+        <metric>count hotels</metric>
+        <metric>mean [happiness] of residents with [ local ]</metric>
+        <metric>standard-deviation [happiness] of residents with [ local ]</metric>
+        <metric>min [happiness] of residents with [ local ]</metric>
+        <metric>max [happiness] of residents with [ local ]</metric>
+        <metric>tourist-tax-rate</metric>
+        <metric>business-tax-rate</metric>
+      </metrics>
+      <constants>
+        <enumeratedValueSet variable="birth-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="unhappy-months-threshold">
+          <value value="6"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="initialise?">
+          <value value="true"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-seasonal-worker">
+          <value value="0.3"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="hotel-capacity">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-boat-tourist">
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-residents">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="low-funds-threshold">
+          <value value="400"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-tax-rate">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-tourists">
+          <value value="73"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-threshold">
+          <value value="30"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="locals-tax-rate">
+          <value value="10"></value>
+          <value value="30"></value>
+          <value value="50"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="business-tax-rate">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-radius">
+          <value value="5"></value>
+        </enumeratedValueSet>
+      </constants>
+    </experiment>
+    <experiment name="happiness-threshold" repetitions="3" sequentialRunOrder="true" runMetricsEveryStep="true" timeLimit="8000">
+      <setup>setup</setup>
+      <go>go</go>
+      <metrics>
+        <metric>count residents with [ local ]</metric>
+        <metric>count tourists with [ tourist-type = "hotel" ]</metric>
+        <metric>count tourists with [ tourist-type = "boat" ]</metric>
+        <metric>count hotels</metric>
+        <metric>mean [happiness] of residents with [ local ]</metric>
+        <metric>standard-deviation [happiness] of residents with [ local ]</metric>
+        <metric>min [happiness] of residents with [ local ]</metric>
+        <metric>max [happiness] of residents with [ local ]</metric>
+        <metric>tourist-tax-rate</metric>
+        <metric>business-tax-rate</metric>
+        <metric>water-supply-level</metric>
+        <metric>river-level</metric>
+        <metric>count patches with [ land-type = "infrastructure" ]</metric>
+      </metrics>
+      <constants>
+        <enumeratedValueSet variable="birth-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="unhappy-months-threshold">
+          <value value="6"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="initialise?">
+          <value value="true"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-seasonal-worker">
+          <value value="0.3"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="hotel-capacity">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-boat-tourist">
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-residents">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="low-funds-threshold">
+          <value value="400"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-tax-rate">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-tourists">
+          <value value="73"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-threshold">
+          <value value="10"></value>
+          <value value="30"></value>
+          <value value="50"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="locals-tax-rate">
+          <value value="10"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="business-tax-rate">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-radius">
+          <value value="5"></value>
+        </enumeratedValueSet>
+      </constants>
+    </experiment>
+    <experiment name="tourist-attrition" repetitions="3" sequentialRunOrder="true" runMetricsEveryStep="true" timeLimit="8000">
+      <setup>setup</setup>
+      <go>go</go>
+      <metrics>
+        <metric>count residents with [ local ]</metric>
+        <metric>count tourists with [ tourist-type = "hotel" ]</metric>
+        <metric>count tourists with [ tourist-type = "boat" ]</metric>
+        <metric>count hotels</metric>
+        <metric>mean [happiness] of residents with [ local ]</metric>
+        <metric>standard-deviation [happiness] of residents with [ local ]</metric>
+        <metric>min [happiness] of residents with [ local ]</metric>
+        <metric>max [happiness] of residents with [ local ]</metric>
+        <metric>tourist-tax-rate</metric>
+        <metric>business-tax-rate</metric>
+        <metric>water-supply-level</metric>
+        <metric>river-level</metric>
+        <metric>count patches with [ land-type = "infrastructure" ]</metric>
+      </metrics>
+      <constants>
+        <enumeratedValueSet variable="birth-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="unhappy-months-threshold">
+          <value value="6"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="initialise?">
+          <value value="true"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-seasonal-worker">
+          <value value="0.3"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="hotel-capacity">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-boat-tourist">
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-residents">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="low-funds-threshold">
+          <value value="400"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-tax-rate">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="sewage-rate">
+          <value value="0.002"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-tourists">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-threshold">
+          <value value="30"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="locals-tax-rate">
+          <value value="10"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="business-tax-rate">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-attrition-scale">
+          <value value="0.01"></value>
+          <value value="0.2"></value>
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-growth-rate">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-radius">
+          <value value="5"></value>
+        </enumeratedValueSet>
+      </constants>
+    </experiment>
+    <experiment name="tourist-growth-rate" repetitions="3" sequentialRunOrder="true" runMetricsEveryStep="true" timeLimit="8000">
+      <setup>setup</setup>
+      <go>go</go>
+      <metrics>
+        <metric>count residents with [ local ]</metric>
+        <metric>count tourists with [ tourist-type = "hotel" ]</metric>
+        <metric>count tourists with [ tourist-type = "boat" ]</metric>
+        <metric>count hotels</metric>
+        <metric>mean [happiness] of residents with [ local ]</metric>
+        <metric>standard-deviation [happiness] of residents with [ local ]</metric>
+        <metric>min [happiness] of residents with [ local ]</metric>
+        <metric>max [happiness] of residents with [ local ]</metric>
+        <metric>tourist-tax-rate</metric>
+        <metric>business-tax-rate</metric>
+        <metric>water-supply-level</metric>
+        <metric>river-level</metric>
+        <metric>count patches with [ land-type = "infrastructure" ]</metric>
+      </metrics>
+      <constants>
+        <enumeratedValueSet variable="birth-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="unhappy-months-threshold">
+          <value value="6"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="initialise?">
+          <value value="true"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-seasonal-worker">
+          <value value="0.3"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="hotel-capacity">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-boat-tourist">
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-residents">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="low-funds-threshold">
+          <value value="400"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-tax-rate">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="sewage-rate">
+          <value value="0.002"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-tourists">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-threshold">
+          <value value="30"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="locals-tax-rate">
+          <value value="10"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="business-tax-rate">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-attrition-scale">
+          <value value="0.2"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-growth-rate">
+          <value value="10"></value>
+          <value value="20"></value>
+          <value value="50"></value>
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-radius">
+          <value value="5"></value>
+        </enumeratedValueSet>
+      </constants>
+    </experiment>
+    <experiment name="unhappy-months" repetitions="3" sequentialRunOrder="true" runMetricsEveryStep="true" timeLimit="8000">
+      <setup>setup</setup>
+      <go>go</go>
+      <metrics>
+        <metric>count residents with [ local ]</metric>
+        <metric>count tourists with [ tourist-type = "hotel" ]</metric>
+        <metric>count tourists with [ tourist-type = "boat" ]</metric>
+        <metric>count hotels</metric>
+        <metric>mean [happiness] of residents with [ local ]</metric>
+        <metric>standard-deviation [happiness] of residents with [ local ]</metric>
+        <metric>min [happiness] of residents with [ local ]</metric>
+        <metric>max [happiness] of residents with [ local ]</metric>
+        <metric>tourist-tax-rate</metric>
+        <metric>business-tax-rate</metric>
+        <metric>water-supply-level</metric>
+        <metric>river-level</metric>
+        <metric>count patches with [ land-type = "infrastructure" ]</metric>
+      </metrics>
+      <constants>
+        <enumeratedValueSet variable="birth-rate">
+          <value value="0.1"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="unhappy-months-threshold">
+          <value value="1"></value>
+          <value value="3"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="initialise?">
+          <value value="true"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-seasonal-worker">
+          <value value="0.3"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="hotel-capacity">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="proportion-boat-tourist">
+          <value value="0.5"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-residents">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="low-funds-threshold">
+          <value value="400"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-tax-rate">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="sewage-rate">
+          <value value="0.002"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="n-tourists">
+          <value value="0"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-threshold">
+          <value value="30"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="locals-tax-rate">
+          <value value="10"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="business-tax-rate">
+          <value value="100"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-attrition-scale">
+          <value value="0.2"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="tourist-growth-rate">
+          <value value="20"></value>
+        </enumeratedValueSet>
+        <enumeratedValueSet variable="happiness-radius">
+          <value value="5"></value>
+        </enumeratedValueSet>
+      </constants>
+    </experiment>
+  </experiments>
 </model>
